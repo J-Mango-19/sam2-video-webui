@@ -1,0 +1,2 @@
+/afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/sam2
+/afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/notebooks/videos/bedroom
