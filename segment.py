@@ -32,6 +32,7 @@ ann_obj_id      = 1                             # We are only annotating one obj
 images          = process_img_paths(sample_dir) # returns an odered list of img paths from sample_dir
 video_segments  = [None] * len(images)          # A list of image-shaped numpy boolean arrays, where a True entry indicates that pixel is part of the segmented object; False means it's not
 device          = set_device()                  # Moves SAM2 to CUDA if available. 
+point_labels   = []                             # holds the labels (0:negative 1:positive) for all points prompts
 
 def export_result():
     """
@@ -76,12 +77,14 @@ def video_slide(frame, all_points, image=None):
 
     print(f'Video_slide called. All points: {all_points}')
     all_points = list(map(eval, all_points.split('\n'))) if all_points else []
-    positive_points = list(filter(lambda x: x[2]==frame and x[3]==1, all_points))
-    positive_points = list(map(lambda x: x[:2], positive_points))
-    negative_points = list(filter(lambda x: x[2]==frame and x[3]==0, all_points))
-    negative_points = list(map(lambda x: x[:2], negative_points))
-    draw_point_on_plot(image, positive_points, Color.pos)
-    draw_point_on_plot(image, negative_points, Color.neg)
+    if all_points != []:
+        print(f'all_points is: {all_points}')
+        positive_points = list(filter(lambda x: x[2]==frame and x[3]==1, all_points))
+        positive_points = list(map(lambda x: x[:2], positive_points))
+        negative_points = list(filter(lambda x: x[2]==frame and x[3]==0, all_points))
+        negative_points = list(map(lambda x: x[:2], negative_points))
+        draw_point_on_plot(image, positive_points, Color.pos)
+        draw_point_on_plot(image, negative_points, Color.neg)
 
     if video_segments[frame] is not None:
         mask = np.zeros_like(image)
@@ -107,29 +110,44 @@ def point_add(all_points, new_point, frame, label):
     Uses SAM2 to generate a new mask for the specified frame based on a new point and if it's positive/negative
     """
     global video_segments
+    global point_labels
+    # all points is the same form as new point -- that is, a list of points, where each point is [x_coord, y_coord, frame_num, pos_or_neg]
     new_point = list(eval(new_point)) + [frame, label]
     all_points = list(map(eval, all_points.split('\n'))) if all_points else []
     all_points.append(new_point)
+    point_labels.append(int(label))
     all_points = '\n'.join(list(map(str, all_points)))
     points = np.array([new_point[:2]], dtype=np.float32)
     labels = np.array([label], np.int32)
     out_frame_idx, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(inference_state, frame_idx=frame, obj_id=ann_obj_id, points=points, labels=labels)
     video_segments[out_frame_idx] = (out_mask_logits[0] > 0.0).cpu().numpy()[0] # converts model's confidence scores into binary masks
     image = video_slide(frame, all_points)['value']
-    print(f'point_add image type: {type(image)} shape: {image.shape} value: {image}')
     return {'__type__':'update', 'value':image}, all_points
 
 def point_remove(all_points, frame):
     """
     removes the most recently added point
     """
+    global video_segments
+    global point_labels
     all_points = list(map(eval, all_points.split('\n'))) if all_points else [] # convert all_points string into a list of coordinates
-    all_points = all_points[:-1]                                               # remove most recent coordinate
-    all_points = '\n'.join(list(map(str, all_points)))                         # convert all_points list of coordinates into a string
-    image = video_slide(frame, all_points)['value']                            # update the UI
-    print(f'point_remove image type: {type(image)} shape: {image.shape} value: {image}')
-    return {'__type__':'update', 'value':image}, all_points
+    all_points = all_points[:-1]                                               # remove most recent point coordinate
+    if all_points == []:
+        all_points = None
+    point_labels = point_labels[:-1]                                           # remove the most point label
+    video_segments = [None]*len(images)                                        # remove current masks from images
+    if all_points:
+        # clear sam predictions and start over without the latest point
+        predictor.reset_state(inference_state)
+        print(f'Just removed a point. all_points: {all_points}')
+        point_coords = np.array([point[:2] for point in all_points])
+        print(f'Point_coords generated from all_points; {point_coords.shape=}, {point_coords=}')
+        out_frame_idx, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(inference_state, frame_idx=frame, obj_id=ann_obj_id, points=point_coords, labels=np.array(point_labels, dtype=np.int32))
+        video_segments[out_frame_idx] = (out_mask_logits[0] > 0.0).cpu().numpy()[0] # converts model's confidence scores into binary masks
+        all_points = '\n'.join(list(map(str, all_points)))                          # convert all_points list of coordinates into a string
 
+    image = video_slide(frame, all_points)['value']                            # update the UI
+    return {'__type__':'update', 'value':image}, all_points
 
 def refresh_image(frame, all_points):
     """
@@ -164,8 +182,8 @@ def clear_video_propagate(all_points, frame):
 
 def point_show(point, frame, all_points):
     """
-    Updates the UI with a temporary point 
-    Does not tell SAM2 yet bc user has not dediced if this is a positive or negative point
+    Updates the UI, drawing a temporary point and ensuring all masks, permanent points, etc are shown
+    Does not change inference_state yet bc user has not dediced if this is a positive or negative point
     """
     image = cv2.imread(images[frame])
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -204,11 +222,10 @@ with gr.Blocks(title="SAM2") as demo:
                         load_info = gr.Textbox(value="SAM2 not yet loaded.", lines=1, interactive=False, show_label=False, container=False)
                     with gr.Row(min_height=40): pass
                     with gr.Row():
-                        show_point = gr.Button("show new point", variant="primary")
                         refresh = gr.Button("refresh (update display)", variant="primary")
                     with gr.Row(min_height=40): pass
-                    add_positive_point = gr.Button("set positive point ", variant="huggingface")
-                    add_negative_point = gr.Button("set negative point", variant="huggingface")
+                    add_positive_point = gr.Button("set new point as positive", variant="huggingface")
+                    add_negative_point = gr.Button("set new point as negative", variant="huggingface")
                     remove_point       = gr.Button("remove last point", variant="huggingface")
                     with gr.Row(min_height=40): pass
                     with gr.Row():
@@ -220,10 +237,9 @@ with gr.Blocks(title="SAM2") as demo:
                         export_info = gr.Textbox(value="export info", lines=1, interactive=False, show_label=False, container=False)
 
             image_input.select(get_select_coords, [slider, all_points], [image_input, new_point])
-            slider.change(video_slide, [slider, all_points], [image_input])
+            slider.change(point_show, [new_point, slider, all_points], [image_input])
             
             load_model.click(model_load, [], [load_info])
-            show_point.click(point_show, [new_point, slider, all_points], [image_input])
             refresh.click(refresh_image, [slider, all_points], [image_input])
 
             add_positive_point.click(partial(point_add, label=1), [all_points, new_point, slider], [image_input, all_points])
