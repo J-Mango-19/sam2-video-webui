@@ -43,13 +43,13 @@ def set_device():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')    
     print(f'Using Device: {device}')
 
-    if device == torch.device('cuda'):
+    if device.type == 'cuda':
         torch.autocast('cuda', dtype=torch.bfloat16).__enter__()
         if torch.cuda.get_device_properties(0).major >= 8:
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
 
-    elif device == torch.device('cpu'):
+    elif device.type == 'cpu':
         torch.set_num_threads(4) # CRC frontend allows usage of a maximum of 4 cpus
 
     return device

@@ -9,7 +9,7 @@ module load conda
 conda activate sam2
 
 fsync /afs/crc.nd.edu/user/j/jmangion/Public/sam2-video-webui/gradio_link.txt &
-python3 test.py > gradio_link.txt
+python segment.py > gradio_link.txt
 #python3 test.py
 
 #stdbuf -oL python3 test.py > gradio_link.txt

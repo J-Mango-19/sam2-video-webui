@@ -5,14 +5,21 @@
 ### Setup
 
 1. Connection to SAM2 repo
-	a. Modify line 1 of `paths.txt` with the path to your !(sam2)[https://github.com/facebookresearch/sam2] repository.
+
+	a. Modify line 1 of `paths.txt` with the path to your ![sam2](https://github.com/facebookresearch/sam2) repository.
 2. (If necessary) Install gradio and nodejs in conda environment
+
 	a. Activate sam2 conda environment
 	b. run `pip install gradio` and test its installation with `conda list gradio`
 	c. run `conda install -c conda-forge nodejs`
 
 3. Supply data 
+
 	a. Modify line 2 of `paths.txt` with the path to your data directory (numbered .jpg images representing a video)
+
+4. Set preferences
+
+	a. Optionally compile sam2 by changing `compile_sam=False` to `compile_sam=True` in `segment.py`. Note compiling makes loading the model, as well as its first inference, slow. Compiling only offers speedup for long videos. 
 
 ### Run
 
