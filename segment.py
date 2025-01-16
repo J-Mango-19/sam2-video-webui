@@ -28,19 +28,12 @@ sam2_checkpoint = "/afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/che
 model_cfg = "//afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/sam2/configs/sam2.1/sam2.1_hiera_t.yaml"
 
 # Initialize global variables 
+device          = set_device()                  # Moves SAM2 to CUDA if available. 
 predictor       = None                          # SAM2 model
 compile_sam     = False                         # Optionally compile SAM2 model. Compilation and first inference are slow, but compiled SAM2 is faster for large videos.
 inference_state = None                          # Dictionary closely linked to SAM2 model. Holds information pertaining to the current segmentation task (see SAM2VideoPredictor.init_state())
 images          = process_img_paths(sample_dir) # returns an odered list of img paths from sample_dir
-#video_segments  = [[None] * len(images) for _ in range(3)] # A list lists of image-shaped numpy boolean arrays, where a True entry indicates that pixel is part of the segmented object; False means it's not
-video_segments  = [[None]*3 for _ in range(len(images))]
-device          = set_device()                  # Moves SAM2 to CUDA if available. 
-
-"""
-video_segments
-A list, where each element corresponds to a frame in the video.
-Each frame element is itself a list of 3 HxW boolean arrays. Each element of this sublist corresponds to an object
-"""
+video_segments  = [[None]*3 for _ in range(len(images))] # A list of lists, where each outer list corresponds to a video frame, and each sub-list corresponds to an object and is a numpy boolean array (true for a mask there, false otherwise)
 
 def export_result():
     """
@@ -50,20 +43,6 @@ def export_result():
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(out_video_path, fourcc, fps, (width, height), True)
 
-    """
-    for k, video_segment in enumerate(video_segments):
-        for i, mask in enumerate(video_segment):
-            mask = np.where(mask, 255, 0)
-            cv2.imwrite(os.path.join(mask_dir, f"{i}.jpg"), mask)
-
-        for image, mask in zip(images, video_segment):
-            image = cv2.imread(image)
-            mask[:, :, k] = np.tile(mask[:,:,None], (1, 1, 3))
-            image = np.where(mask, 0, image)
-            writer.write(image)
-    writer.release()
-    """
-
     for i, frame_segment in enumerate(video_segments):           # for each frame
         image = cv2.imread(images[i])
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -71,10 +50,10 @@ def export_result():
         for k in range(len(frame_segment)):                       # for each masked object
             mask[:, :, k] = np.where(frame_segment[k], 255, 0)
 
-            image[:, :, k] = np.where(frame_segment[k], 255, image)
+            image[:, :, k] = np.where(frame_segment[k], 255, image[:, :, k])
 
         cv2.imwrite(os.path.join(mask_dir, f"{i}.jpg"), mask)
-        writer.write(image)
+        writer.write(cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
 
     writer.release()
     return f'masked video exported to: {out_video_path}', out_video_path
@@ -100,10 +79,8 @@ def video_slide(frame, all_points, image=None):
         image = cv2.imread(images[frame])
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-    print(f'Video_slide called. All points: {all_points}')
     all_points = list(map(eval, all_points.split('\n'))) if all_points else []
     if all_points != []:
-        print(f'all_points is: {all_points}')
         positive_points = list(filter(lambda x: x[2]==frame and x[3]==1, all_points))
         positive_points = list(map(lambda x: x[:2], positive_points))
         negative_points = list(filter(lambda x: x[2]==frame and x[3]==0, all_points))
@@ -111,18 +88,9 @@ def video_slide(frame, all_points, image=None):
         draw_point_on_plot(image, positive_points, Color.pos)
         draw_point_on_plot(image, negative_points, Color.neg)
 
-    """
-    for k in range(len(video_segments)): # for each color
-        if video_segments[k][frame] is not None: # if there is a mask here
-            mask = np.zeros_like(image)
-            print(f'MASK SHAPE: {mask.shape}')
-            mask[:, :, k] = np.where(video_segments[k][frame], 255, 0) # applies the colored mask to the image
-            image = np.where(mask > 0.0, mask, image)
-    """
     # apply colored masks from video_segments to specified image
     frame_segment = video_segments[frame]
     mask = np.zeros_like(image)
-    print(f'MASK (ie image) SHAPE: {mask.shape}')
     for k in range(len(frame_segment)):
         if frame_segment[k] is not None:
             mask[:, :, k] = np.where(frame_segment[k], 255, 0) # creates a colored mask
@@ -172,9 +140,7 @@ def point_remove(all_points, frame):
         all_points = None
     video_segments = [[None]*3 for _ in range(len(images))]                     # delete current masks
     predictor.reset_state(inference_state)
-    print(f'Just removed a point. all_points: {all_points}')
 
-    print("C")
     # if there are any remaining point prompts, re-predict masks (this time without the latest point)
     if all_points:
         # extract coords, frames, and labels into separate lists for easy processing
@@ -185,7 +151,6 @@ def point_remove(all_points, frame):
 
         # if points are all on the same frame and object, we can submit them to sam2 all at once for efficiency
         if (sorted(point_frames)[0] == sorted(point_frames)[-1]) and (sorted(obj_ids)[0] == sorted(obj_ids)[-1]):
-            print("D")
             frame  = point_frames[0]
             obj_id = obj_ids[0]
             out_frame_idx, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(inference_state, frame_idx=frame, obj_id=obj_id, points=point_coords, labels=point_labels)
@@ -194,16 +159,12 @@ def point_remove(all_points, frame):
         # if points are on different frames and/or objects, then we must submit them to sam2 separately
         else: 
             for coord, frame, label, obj_id in zip(point_coords, point_frames, point_labels, obj_ids):
-                print("E")
                 out_frame_idx, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(inference_state, frame_idx=frame, obj_id=obj_id, points=coord, labels=label)
                 video_segments[out_frame_idx][obj_id] = (out_mask_logits[obj_id] > 0.0).cpu().numpy()[0] # converts model's confidence scores into binary masks and applies them to the images
 
         all_points = '\n'.join(list(map(str, all_points)))                          # convert all_points into a string
 
-    print("A")
     image = video_slide(frame, all_points)['value']                            # update the UI
-    print("B")
-    print(type(image))
     return {'__type__':'update', 'value':image}, all_points
 
 def refresh_image(frame, all_points):
@@ -254,10 +215,10 @@ with gr.Blocks(title="SAM2") as demo:
     gr.Markdown("""# Interact with SAM2 through your browser 
             ### Steps: 
             1. load model
-            2. click on image
-
-                a. make selection (positive or negative)
-                b. repeat step 2 until desired mask reached
+            2. click on image to set a point   
+                a. Choose which object you intend to segment using radio button  
+                b. make selection (positive or negative)  
+                c. repeat step 2 until desired mask reached  
             3. Export masked video
               """)
     with gr.Tabs():
