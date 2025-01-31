@@ -9,8 +9,10 @@ def process_img_paths(sample_dir):
     """
     images = os.listdir(sample_dir)
     images = sorted(images, key=lambda x: int(x.split('.')[0]))
+
     ### NOTE: images reduced in size to only the first 5 to speed up testing. Remove the [:5] later
-    images = list(map(lambda x: os.path.join(sample_dir, x), images))[:5]
+    #images = list(map(lambda x: os.path.join(sample_dir, x), images))[:5]
+    images = list(map(lambda x: os.path.join(sample_dir, x), images))
     return images
 
 def set_sam_path(path_file='./paths.txt'):

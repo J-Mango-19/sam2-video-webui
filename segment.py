@@ -6,6 +6,7 @@ import numpy as np
 import gradio as gr
 import matplotlib.pyplot as plt
 from functools import partial
+from gradio_image_annotation import image_annotator # must install this separately from gradio library
 from sam2.build_sam import build_sam2_video_predictor
 from utils import *
 
@@ -67,8 +68,8 @@ def model_load():
     inference_state = predictor.init_state(video_path=sample_dir)
     predictor.reset_state(inference_state)
     # NOTE: this reduces the cost of inference for testing. Remove this line (the next line) later.
-    inference_state['images'] = inference_state['images'][:5]
-    inference_state['num_frames']=5
+    # inference_state['images'] = inference_state['images'][:5]
+    # inference_state['num_frames']=5
     return f"SAM2 ({sam2_checkpoint.split('/')[-1][:-3]}) loaded successfully"
 
 def video_slide(frame, all_points, image=None):
@@ -174,13 +175,16 @@ def refresh_image(frame, all_points):
     image = video_slide(frame, all_points)['value']
     return {'__type__':'update', 'value':image}
 
-def video_propagate(all_points, frame):
+def video_propagate(all_points, frame, reverse):
     """
-    Tells SAM2 to propagate the masks across the video
+    Tells SAM2 to propagate the masks across the video. 
     """
     global video_segments
+    global inference_state
     video_segments = video_segments if video_segments else [[None] * 3 for _ in range(len(images))]
-    for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
+
+    predictor._get_image_feature(inference_state, frame_idx=frame, batch_size=1)
+    for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state = inference_state, start_frame_idx = frame, reverse=reverse):
         for out_obj_id in out_obj_ids:
             video_segments[out_frame_idx][out_obj_id] = (out_mask_logits[out_obj_id] > 0.0).cpu().numpy()[0] # converts SAM2 confidence scores into binary masks
 
@@ -206,8 +210,9 @@ def point_show(point, frame, all_points):
     """
     image = cv2.imread(images[frame])
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    point = eval(point)
-    draw_point_on_plot(image, [point], Color.tmp)
+    if point != "":
+        point = eval(point)
+        draw_point_on_plot(image, [point], Color.tmp)
     image = video_slide(frame, all_points, image)['value']
     return {'__type__':'update', 'value':image}
 
@@ -251,12 +256,13 @@ with gr.Blocks(title="SAM2") as demo:
                     remove_point       = gr.Button("remove last point", variant="huggingface")
                     with gr.Row(min_height=40): pass
                     with gr.Row():
-                        propagate_btn = gr.Button("propagate", variant="primary")
+                        forward_propagate_btn = gr.Button("propagate masks forward", variant="primary")
+                        backward_propagate_btn = gr.Button("propagate masks backward", variant="primary")
                         clear_propagate_btn = gr.Button("clear propagate", variant="stop")
                     with gr.Row(min_height=40): pass
                     with gr.Row():
                         export_button = gr.Button("export", variant="secondary")
-                        export_info = gr.Textbox(value="export info", lines=1, interactive=False, show_label=False, container=False)
+                        export_info = gr.Textbox(value="", lines=1, interactive=False, show_label=False, container=False)
 
             image_input.select(get_select_coords, [slider, all_points], [image_input, new_point])
             slider.change(point_show, [new_point, slider, all_points], [image_input])
@@ -268,7 +274,8 @@ with gr.Blocks(title="SAM2") as demo:
             add_negative_point.click(partial(point_add, label=0), [all_points, new_point, slider, obj_id], [image_input, all_points])
             remove_point.click(point_remove, [all_points, slider], [image_input, all_points])
 
-            propagate_btn.click(video_propagate, [all_points, slider], [image_input])
+            forward_propagate_btn.click(partial(video_propagate, reverse=False), [all_points, slider], [image_input])
+            backward_propagate_btn.click(partial(video_propagate, reverse=True), [all_points, slider], [image_input])
             clear_propagate_btn.click(clear_video_propagate, [all_points, slider], [image_input])
 
             export_button.click(export_result, [], [export_info, video_output])
