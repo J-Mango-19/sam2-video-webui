@@ -70,3 +70,58 @@ def draw_point_on_plot(image, points, color):
     for point in points:
         cv2.circle(image, point[:2], radius, color, 4)
 
+def draw_box_on_plot(img, boxes, color):
+    """
+    draw a box on the image with top left corner = box[0] and bottom right corner = box[1]
+    """
+    for box in boxes:
+        cv2.rectangle(img, box[0], box[1], color, 4)
+
+def point_str_to_list(points):
+    points = list(map(eval, points.split('\n'))) if points else []
+    return points
+
+def point_list_to_str(points):
+    if points is None:
+        points = []
+    points = '\n'.join(list(map(str, points)))
+    return points
+
+def parse_paths(file_path):
+    """
+    parse the paths.txt file
+    """
+    path_dict = {}
+    with open(file_path, 'r') as f:
+        kv_pairs = f.read().splitlines()
+
+    for kv in kv_pairs:
+        # Hashtags will act as comments in the paths file
+        if kv.startswith("#") or kv == "":
+            continue
+        try:
+            key = kv.split(': ')[0].strip()
+            val = kv.split(': ')[1].strip()
+
+        except IndexError:
+            key = kv.split(':')[0].strip()
+            val = kv.split(':')[1].strip()
+
+        if key == "sam2_path":
+            path_dict["sam2_path"] = val
+        elif key == "sample_dir":
+            path_dict["sample_dir"] = val
+        elif key == "video_data_path":
+            path_dict["video_data_path"] = val
+        elif key == "mask_dir":
+            path_dict["mask_dir"] = val
+        elif key == "raw_video_path":
+            path_dict["raw_video_path"] = val
+        elif key == "out_video_path":
+            path_dict["out_video_path"] = val
+        elif key == "model_cfg":
+            path_dict["model_cfg"] = val
+        elif key == "sam2_checkpoint":
+            path_dict["sam2_checkpoint"] = val
+
+    return path_dict

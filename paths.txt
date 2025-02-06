@@ -1,2 +1,29 @@
-/afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/sam2
-/afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/notebooks/videos/bedroom
+### paths.txt ### 
+# modify these paths with your own file paths
+
+# sample dir is the directory containing the video you want to segment
+# it should be a directory of ordered .jpg images
+sample_dir: /afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/notebooks/videos/bedroom
+
+# path to sam2 repo
+sam2_path: /afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/sam2
+
+# version of sam2 to use (small, large, etc)
+sam2_checkpoint: /afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/checkpoints/sam2.1_hiera_tiny.pt
+
+# model config path (yaml file for sam2)
+# must use // at the beginning of this path rather than just /
+model_cfg: //afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/sam2/configs/sam2.1/sam2.1_hiera_t.yaml
+
+# directory of images corresponding to the video to segment
+video_data_path: /afs/crc.nd.edu/user/j/jmangion/Public/segment-anything-2/notebooks/videos/bedroom
+
+# where the output masks will be saved
+mask_dir: ./masks
+
+# If there is a .mp4 file corresponding to your video, put it here and it'll display in the UI
+# UI still works if this path leads to nothing
+raw_video_path: ./original_video.mp4
+
+# Out_video path is where the segmented video will be downloaded if you choose to do so
+out_video_path: ./segmented_video_output.mp4
