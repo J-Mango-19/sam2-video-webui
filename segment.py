@@ -253,19 +253,65 @@ def refresh_image(frame, all_points, all_boxes):
 
 def video_propagate(all_points, all_boxes, frame, reverse):
     """
-    Tells SAM2 to propagate the masks across the video. 
+    Calls SAM2 to propagate masks forward and backward in the video from the given frame.
+    Ensures that masks are propagated throughout the entire video while resolving conflicts.
     """
     global video_segments
-    global inference_state
-    video_segments = video_segments if video_segments else [[None] * 3 for _ in range(len(images))]
 
-    predictor._get_image_feature(inference_state, frame_idx=frame, batch_size=1)
-    for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state = inference_state, start_frame_idx = frame, reverse=reverse):
-        for out_obj_id in out_obj_ids:
-            video_segments[out_frame_idx][out_obj_id] = (out_mask_logits[out_obj_id] > 0.0).cpu().numpy()[0] # converts SAM2 confidence scores into binary masks
+    if not video_segments or len(video_segments) != len(images):
+        video_segments = [[None] * 3 for _ in range(len(images))]
 
-    image = video_slide(frame, all_points, all_boxes)['value']
-    return {'__type__':'update', 'value':image}
+    # get all interactive frames and sort them by time
+    interactive_frames = sorted(set(point[2] for point in map(eval, all_points.split("\n"))))
+
+
+    # first propagate forward (from the earliest interactive frame)
+    for interactive_frame in interactive_frames:
+        for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            inference_state, start_frame_idx=interactive_frame
+        ):
+            out_mask_numpy = out_mask_logits.cpu().numpy()
+            for i, out_obj_id in enumerate(out_obj_ids):
+                new_mask = (out_mask_numpy[i] > 0.0)[0].astype(bool)  # make sure new_mask is boolean
+
+                if video_segments[out_frame_idx][out_obj_id] is None:
+                    video_segments[out_frame_idx][out_obj_id] = new_mask
+                else:
+                    prev_mask = video_segments[out_frame_idx][out_obj_id].astype(bool)  # make sure prev_mask is boolean
+                    if prev_mask.shape != new_mask.shape:
+                        print(f"Shape mismatch at frame {out_frame_idx}, object {out_obj_id}. Skipping IoU calculation.")
+                        continue  # skip if the shapes do not match
+
+                    iou = np.sum(prev_mask & new_mask) / (np.sum(prev_mask | new_mask) + 1e-6)
+
+                    if iou < 0.5:
+                        video_segments[out_frame_idx][out_obj_id] = new_mask
+
+    # then propagate backward (from the latest interactive frame)
+    for interactive_frame in reversed(interactive_frames):
+        if interactive_frame > 0:
+            for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+                inference_state, start_frame_idx=interactive_frame, reverse=True
+            ):
+                out_mask_numpy = out_mask_logits.cpu().numpy()
+                for i, out_obj_id in enumerate(out_obj_ids):
+                    new_mask = (out_mask_numpy[i] > 0.0)[0].astype(bool)
+
+                    if video_segments[out_frame_idx][out_obj_id] is None:
+                        video_segments[out_frame_idx][out_obj_id] = new_mask
+                    else:
+                        prev_mask = video_segments[out_frame_idx][out_obj_id].astype(bool)
+                        if prev_mask.shape != new_mask.shape:
+                            print(f"Shape mismatch at frame {out_frame_idx}, object {out_obj_id}. Skipping IoU calculation.")
+                            continue
+
+                        iou = np.sum(prev_mask & new_mask) / (np.sum(prev_mask | new_mask) + 1e-6)
+                        if iou < 0.5:
+                            video_segments[out_frame_idx][out_obj_id] = new_mask
+
+    # Update UI display
+    image = video_slide(frame, all_points)['value']
+    return {'__type__': 'update', 'value': image}
 
 def clear_video_propagate(all_points, all_boxes, frame):
     """
